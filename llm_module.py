@@ -3,15 +3,23 @@ import os
 from typing import Optional
 import time
 
+# Configure API key - PASTE YOUR KEY BELOW
+API_KEY = "YOUR_API_KEY_HERE"  # ← Put your actual API key here
 
-# Configure API key from environment variable (more secure)
-API_KEY = os.getenv("your_key_here")
-
-if not API_KEY:
-    print("[LLM] ⚠️  WARNING: GEMINI_API_KEY not found in environment variables!")
-    print("[LLM] Please set it with: export GEMINI_API_KEY='your-key-here'")
-    print("[LLM] Using fallback responses only...")
-    API_KEY = None
+# Optional: Can still use environment variable if you want
+if API_KEY == "YOUR_API_KEY_HERE":
+    # Try environment variable as backup
+    env_key = os.getenv("GEMINI_API_KEY")
+    if env_key:
+        API_KEY = env_key
+        print("[LLM] Using API key from environment variable")
+    else:
+        print("[LLM] ⚠️  WARNING: No API key configured!")
+        print("[LLM] Please paste your API key in llm_module.py")
+        print("[LLM] Using fallback responses only...")
+        API_KEY = None
+else:
+    print("[LLM] Using hardcoded API key")
 
 if API_KEY:
     genai.configure(api_key=API_KEY)
