@@ -5,7 +5,8 @@ import time
 
 
 # Configure API key from environment variable (more secure)
-API_KEY = os.getenv("AIzaSyA_20EP_lXAq3K36q3LVdLYN6zHOUwtwIk")
+API_KEY = os.getenv("your_key_here")
+
 if not API_KEY:
     print("[LLM] ⚠️  WARNING: GEMINI_API_KEY not found in environment variables!")
     print("[LLM] Please set it with: export GEMINI_API_KEY='your-key-here'")
