@@ -3,6 +3,7 @@ import os
 from typing import Optional
 import time
 
+
 # Configure API key from environment variable (more secure)
 API_KEY = os.getenv("AIzaSyA_20EP_lXAq3K36q3LVdLYN6zHOUwtwIk")
 if not API_KEY:
