@@ -12,7 +12,7 @@ SAMPLE_RATE = 16000
 VAD_THRESHOLD = 0.01  # Adjust if needed (0.005 for quieter environments)
 LISTEN_DURATION = 5  # seconds for listen_once
 CHUNK_DURATION = 5  # seconds for continuous listening
-TTS_BUFFER_TIME = 0.5  # Extra wait time after TTS finishes
+TTS_BUFFER_TIME = 1.0  # Extra wait time after TTS finishes (increased from 0.5)
 
 print("[STT] Loading Whisper model...")
 try:
