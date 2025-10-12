@@ -1,0 +1,10 @@
+opencv-python
+face-recognition
+numpy
+matplotlib
+dlib
+mediapipe
+google-generativeai
+sounddevice
+openai-whisper
+pyttsx3
