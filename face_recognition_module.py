@@ -154,6 +154,7 @@ def recognize_face_headless():
                                 state.speaker_is_trusted = True
                     
                     if not is_trusted:
+                        
                         consecutive_unknowns += 1
                         print(f"[FACE] ⚠️  Unknown face detected ({consecutive_unknowns}/{UNKNOWN_THRESHOLD})")
                         
