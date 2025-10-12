@@ -4,19 +4,26 @@ import whisper
 import datetime
 from state import state
 import time
+import os
+# Suppress PortAudio warnings on macOS
+os.environ['PYTHONWARNINGS'] = 'ignore::UserWarning'
+
+# Set specific audio device if needed (optional)
+# Uncomment and adjust if you have multiple audio devices:
+# sd.default.device = 0  # Use device ID from sd.query_devices()
 
 # -------------------------
 # Configuration
 # -------------------------
 SAMPLE_RATE = 16000
-VAD_THRESHOLD = 0.015  # Voice activity detection (increased from 0.01)
+VAD_THRESHOLD = 0.012  # Balanced threshold
 LISTEN_DURATION = 5  # seconds for listen_once
 CHUNK_DURATION = 5  # seconds for continuous listening
-TTS_BUFFER_TIME = 2.0  # Extra wait time after TTS finishes (increased from 1.0)
+POST_TTS_WAIT = 2.0  # INCREASED: Wait after TTS finishes to let audio finish playing
 
 print("[STT] Loading Whisper model...")
 try:
-    whisper_model = whisper.load_model("base")  # 'tiny' for speed, 'base' for accuracy
+    whisper_model = whisper.load_model("base")
     print("[STT] ✅ Whisper model loaded!")
 except Exception as e:
     print(f"[STT] ❌ Failed to load Whisper: {e}")
@@ -36,28 +43,86 @@ def transcribe_speech(text):
         print(f"[STT] Failed to log: {e}")
 
 
+def is_tts_echo(text, audio_level):
+    """
+    Detect if transcribed text is likely TTS echo/feedback.
+    Uses both content analysis and audio characteristics.
+    
+    Args:
+        text: Transcribed text (lowercase)
+        audio_level: Maximum audio amplitude
+    
+    Returns:
+        bool: True if likely TTS echo
+    """
+    # Common phrases from guard responses
+    tts_keywords = [
+        "private room", "must leave", "off-limits", "not authorized",
+        "alarm", "security", "warning", "authorities", "owner",
+        "notified", "breach", "immediately", "final", "leave now",
+        "unauthorized", "restricted", "trespassing"
+    ]
+    
+    # Check for keyword matches
+    keyword_count = sum(1 for keyword in tts_keywords if keyword in text)
+    
+    # If multiple keywords AND low audio level, likely echo
+    if keyword_count >= 2 and audio_level < 0.025:
+        return True
+    
+    # If very similar to common guard phrases
+    guard_phrases = [
+        "hello this is a private room",
+        "you must leave immediately",
+        "this room is off-limits",
+        "this is your final warning",
+        "security breach",
+        "authorities are being contacted"
+    ]
+    
+    for phrase in guard_phrases:
+        # Check similarity (if text contains most of the phrase)
+        words_in_phrase = phrase.split()
+        matching_words = sum(1 for word in words_in_phrase if word in text)
+        if matching_words >= len(words_in_phrase) * 0.7:  # 70% match
+            return True
+    
+    return False
+
+
 def wait_for_tts():
-    """Wait until TTS is completely finished."""
+    """Wait until TTS is completely finished with smart timing."""
+    # Wait while TTS is actively playing
+    tts_was_playing = False
     while state.tts_playing:
+        tts_was_playing = True
         time.sleep(0.1)
-    # Extra buffer time after TTS finishes
-    time.sleep(TTS_BUFFER_TIME)
+    
+    # Only add buffer if TTS was actually playing
+    if tts_was_playing:
+        time.sleep(POST_TTS_WAIT)
+        print("[STT] ⏰ Post-TTS wait complete")
 
 
-def listen_once(duration=LISTEN_DURATION):
+def listen_once(duration=LISTEN_DURATION, skip_tts_check=False):
     """
     Record for specified duration and return transcription.
     Used during guard interactions with visitor.
     
+    Args:
+        duration: Recording duration in seconds
+        skip_tts_check: If True, skip the initial TTS wait (emergency use)
+    
     Returns:
         str: Transcribed text or empty string
     """
-    # CRITICAL: Wait for TTS to completely finish
-    wait_for_tts()
-    
     if not whisper_model:
         print("[STT] ❌ Whisper not loaded!")
         return ""
+    
+    # Wait for TTS unless explicitly skipped
+    if not skip_tts_check:
+        wait_for_tts()
     
     print(f"[STT] 🎤 Listening... (speak now)")
     
@@ -71,21 +136,24 @@ def listen_once(duration=LISTEN_DURATION):
         )
         sd.wait()
         
-        # Double check TTS isn't still playing somehow
+        # Emergency check: if TTS started during recording, abort
         if state.tts_playing:
-            print("[STT] ⚠️  TTS still playing, skipping this recording")
+            print("[STT] ⚠️  TTS interference detected, discarding recording")
             return ""
         
         # Process audio
         audio_flat = audio_data.flatten()
         max_vol = np.max(np.abs(audio_flat))
+        rms = np.sqrt(np.mean(audio_flat**2))
+        
+        print(f"[STT] 📊 Audio stats - Max: {max_vol:.4f}, RMS: {rms:.4f}")
         
         # Check if audio was captured
         if max_vol < 0.001:
-            print("[STT] ⚠️  No audio detected")
+            print("[STT] ⚠️  No audio detected (too quiet)")
             return ""
         
-        # Normalize audio
+        # Normalize audio for better Whisper performance
         if max_vol > 0:
             audio_flat = audio_flat / max_vol
         
@@ -99,30 +167,20 @@ def listen_once(duration=LISTEN_DURATION):
         
         text = result["text"].strip()
         
-        if text:
-            # Filter out common TTS phrases that might leak through
-            tts_phrases = [
-                "hello this is a private room",
-                "you must leave",
-                "this room is off-limits",
-                "alarm",
-                "security",
-                "final warning"
-            ]
-            
-            text_lower = text.lower()
-            is_tts_echo = any(phrase in text_lower for phrase in tts_phrases)
-            
-            if is_tts_echo and max_vol < 0.02:
-                print(f"[STT] 🔇 Filtered TTS echo: '{text}'")
-                return ""
-            
-            print(f"[STT] ✅ Heard: '{text}'")
-            transcribe_speech(text)
-            return text
-        else:
+        if not text:
             print("[STT] ⚠️  No speech detected")
             return ""
+        
+        # Check for TTS echo using smart detection
+        text_lower = text.lower()
+        if is_tts_echo(text_lower, max_vol):
+            print(f"[STT] 🔇 Filtered TTS echo: '{text}' (level: {max_vol:.4f})")
+            return ""
+        
+        # Valid speech detected
+        print(f"[STT] ✅ Heard: '{text}' (level: {max_vol:.4f})")
+        transcribe_speech(text)
+        return text
             
     except Exception as e:
         print(f"[STT] ❌ Error: {e}")
@@ -142,7 +200,7 @@ def audio_listener(hotword="watch my room", coldword="stop watching"):
         print("[STT] ❌ Whisper not loaded!")
         return
     
-    print("[STT] 🎙️ Continuous listener started")
+    print("[STT] 🎙️  Continuous listener started")
     print(f"[STT] 🔑 Hotword: '{hotword}' (activates guard)")
     print(f"[STT] 🔑 Coldword: '{coldword}' (deactivates guard)")
     print(f"[STT] 🎚️  VAD Threshold: {VAD_THRESHOLD}")
@@ -154,13 +212,10 @@ def audio_listener(hotword="watch my room", coldword="stop watching"):
             time.sleep(1)
             continue
         
-        # CRITICAL: Wait for TTS to finish completely
+        # Wait if TTS is playing
         if state.tts_playing:
             time.sleep(0.1)
             continue
-        
-        # Extra safety: wait a bit after TTS stops
-        wait_for_tts()
         
         try:
             # Record a chunk
@@ -174,7 +229,7 @@ def audio_listener(hotword="watch my room", coldword="stop watching"):
             
             # Check if TTS started during recording
             if state.tts_playing:
-                print("[STT] ⏭️  Skipping chunk (TTS started)")
+                print("[STT] ⏭️  Skipping chunk (TTS interference)")
                 continue
             
             # Check audio level
@@ -198,24 +253,15 @@ def audio_listener(hotword="watch my room", coldword="stop watching"):
                 language="en"
             )
             
-            text = result["text"].strip().lower()
+            text = result["text"].strip()
             
             if not text:
                 continue
             
-            # Filter out TTS echoes
-            tts_phrases = [
-                "alarm",
-                "security breach",
-                "private room",
-                "you must leave",
-                "final warning",
-                "authorities"
-            ]
+            text_lower = text.lower()
             
-            is_tts_echo = any(phrase in text for phrase in tts_phrases)
-            
-            if is_tts_echo and max_vol < 0.03:
+            # Filter TTS echoes using smart detection
+            if is_tts_echo(text_lower, max_vol):
                 print(f"[STT] 🔇 Filtered TTS echo: '{text}'")
                 continue
             
@@ -229,14 +275,14 @@ def audio_listener(hotword="watch my room", coldword="stop watching"):
             transcribe_speech(text)
             
             # Check for hotwords
-            if hotword.lower() in text:
+            if hotword.lower() in text_lower:
                 with state.lock:
                     state.guard_status = True
                 print("[STT] 🔒 ═══════════════════════════════════")
                 print("[STT] 🔒 GUARD MODE ACTIVATED!")
                 print("[STT] 🔒 ═══════════════════════════════════")
                 
-            elif coldword.lower() in text:
+            elif coldword.lower() in text_lower:
                 with state.lock:
                     state.guard_status = False
                 print("[STT] 🛑 ═══════════════════════════════════")
@@ -269,12 +315,14 @@ def test_microphone():
     
     print(f"[TEST] Max volume: {max_vol:.6f}")
     print(f"[TEST] RMS level: {rms:.6f}")
+    print(f"[TEST] Current VAD threshold: {VAD_THRESHOLD:.6f}")
     
     if max_vol < 0.001:
         print("[TEST] ❌ No audio detected - check microphone!")
         return False
-    elif max_vol < 0.01:
-        print("[TEST] ⚠️  Audio quiet - consider lowering VAD_THRESHOLD")
+    elif max_vol < VAD_THRESHOLD:
+        print(f"[TEST] ⚠️  Audio below threshold - you may have issues")
+        print(f"[TEST] 💡 Consider lowering VAD_THRESHOLD to {max_vol * 0.8:.4f}")
         return True
     else:
         print("[TEST] ✅ Microphone working well!")

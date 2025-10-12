@@ -4,22 +4,9 @@ from typing import Optional
 import time
 
 # Configure API key - PASTE YOUR KEY BELOW
-API_KEY = "YOUR_API_KEY_HERE"  # ← Put your actual API key here
+API_KEY = "Enter_Your_Key_Saar"# ← Put your actual API key here
 
 # Optional: Can still use environment variable if you want
-if API_KEY == "YOUR_API_KEY_HERE":
-    # Try environment variable as backup
-    env_key = os.getenv("GEMINI_API_KEY")
-    if env_key:
-        API_KEY = env_key
-        print("[LLM] Using API key from environment variable")
-    else:
-        print("[LLM] ⚠️  WARNING: No API key configured!")
-        print("[LLM] Please paste your API key in llm_module.py")
-        print("[LLM] Using fallback responses only...")
-        API_KEY = None
-else:
-    print("[LLM] Using hardcoded API key")
 
 if API_KEY:
     genai.configure(api_key=API_KEY)
@@ -249,9 +236,9 @@ def get_fallback_response(level: int, intent: dict) -> str:
         }
     elif intent['aggressive']:
         fallbacks = {
-            0: "This room is private. You need to leave right now.",
-            1: "I'm not asking. Leave now or I'll alert security.",
-            2: "This is your final warning. Leave immediately!",
+            0: "This room is private.",
+            1: "I'm not asking. Leave now.",
+            2: "This is your final warning.",
             3: "The owner is being notified. Leave now!",
             4: "Security breach. Authorities have been alerted!"
         }
