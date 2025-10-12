@@ -9,10 +9,10 @@ import time
 # Configuration
 # -------------------------
 SAMPLE_RATE = 16000
-VAD_THRESHOLD = 0.01  # Adjust if needed (0.005 for quieter environments)
+VAD_THRESHOLD = 0.015  # Voice activity detection (increased from 0.01)
 LISTEN_DURATION = 5  # seconds for listen_once
 CHUNK_DURATION = 5  # seconds for continuous listening
-TTS_BUFFER_TIME = 1.0  # Extra wait time after TTS finishes (increased from 0.5)
+TTS_BUFFER_TIME = 2.0  # Extra wait time after TTS finishes (increased from 1.0)
 
 print("[STT] Loading Whisper model...")
 try:

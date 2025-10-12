@@ -17,6 +17,7 @@ class GuardState:
         
         # Audio/text states
         self.current_text = ""  # Last transcribed text
+        self.last_tts_text = ""  # Last TTS output (for echo detection)
         
         # Speaker recognition states
         self.current_speaker = None  # Name of current speaker
