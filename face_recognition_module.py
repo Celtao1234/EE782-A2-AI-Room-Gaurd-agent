@@ -2,6 +2,7 @@
 Face Recognition Module for AI Room Guard
 Detects faces and identifies trusted vs untrusted individuals
 macOS-compatible version (no GUI in thread)
+Stops monitoring once intruder is confirmed
 """
 
 import cv2
@@ -16,7 +17,7 @@ TOLERANCE = 0.6  # Lower = stricter matching (0.4-0.6 recommended)
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
 CHECK_INTERVAL = 0.5  # seconds between face checks
-SHOW_WINDOW = False  # Set to False on macOS to avoid threading issues
+UNKNOWN_THRESHOLD = 3  # Consecutive detections before confirming intruder
 
 
 def load_trusted_faces():
@@ -52,11 +53,12 @@ def load_trusted_faces():
     return trusted_embeddings, trusted_names
 
 
-def recognize_face_headless():
+def recognize_face():
     """
     Face recognition without GUI (safe for background threads on macOS).
     Monitors camera while guard_status is True.
-    Sets state.intruder flag when unknown face detected.
+    Stops automatically when intruder is confirmed.
+    Resumes after alarm triggers and resets.
     """
     print("[FACE] 🎥 Initializing camera (headless mode)...")
     
@@ -80,15 +82,36 @@ def recognize_face_headless():
     
     print(f"[FACE] 🎥 Monitoring for faces (headless mode)...")
     print(f"[FACE] Trusted faces: {', '.join(trusted_names)}")
+    print("[FACE] Will pause once intruder is confirmed")
     print("[FACE] Press Ctrl+C to stop")
     
     last_detection_time = 0
     consecutive_unknowns = 0
-    UNKNOWN_THRESHOLD = 3  # Number of consecutive unknown detections before triggering
     
-    # Main recognition loop - runs while guard is active
+    # Main recognition loop
     try:
         while state.guard_status:
+            # Check if camera should be active
+            if not state.camera_active:
+                print("\n" + "="*60)
+                print("[FACE] 📷 CAMERA PAUSED")
+                print("[FACE] Intruder confirmed - AI guard in control")
+                print("[FACE] Waiting for conversation to complete...")
+                print("="*60 + "\n")
+                
+                # Wait until camera should resume
+                while not state.camera_active and state.guard_status:
+                    time.sleep(1)
+                
+                if state.camera_active:
+                    print("\n" + "="*60)
+                    print("[FACE] 🎥 CAMERA RESUMED")
+                    print("[FACE] Back to monitoring mode")
+                    print("="*60 + "\n")
+                    consecutive_unknowns = 0  # Reset counter
+                
+                continue
+            
             ret, frame = camera.read()
             
             if not ret:
@@ -154,21 +177,36 @@ def recognize_face_headless():
                                 state.speaker_is_trusted = True
                     
                     if not is_trusted:
-                        
                         consecutive_unknowns += 1
                         print(f"[FACE] ⚠️  Unknown face detected ({consecutive_unknowns}/{UNKNOWN_THRESHOLD})")
                         
-                        # Only trigger intruder after multiple detections
+                        # Trigger intruder flag after threshold
                         if consecutive_unknowns >= UNKNOWN_THRESHOLD:
                             with state.lock:
                                 if not state.intruder:
+                                    print("\n" + "="*60)
                                     print("[FACE] 🚨 INTRUDER CONFIRMED!")
+                                    print("[FACE] 📷 STOPPING CAMERA MONITORING")
+                                    print("[FACE] 🤖 Handing over to AI guard")
+                                    print("="*60 + "\n")
                                 state.intruder = True
                                 state.current_speaker = "Unknown"
                                 state.speaker_is_trusted = False
+                            
+                            # Confirm intruder and STOP camera thread
+                            state.confirm_intruder()
+                            
+                            # Exit the inner loop to stop processing frames
+                            print("[FACE] 🛑 Camera processing stopped")
+                            break
             else:
                 # No faces detected - reset counter
                 consecutive_unknowns = 0
+            
+            # Check if intruder was just confirmed
+            if state.intruder_confirmed:
+                print("[FACE] 🛑 Intruder confirmed - exiting detection loop")
+                break
     
     except KeyboardInterrupt:
         print("\n[FACE] 👋 Stopping face recognition...")
@@ -180,14 +218,6 @@ def recognize_face_headless():
         print("[FACE] ✅ Camera released")
 
 
-def recognize_face():
-    """
-    Main entry point for face recognition.
-    Uses headless mode (no GUI window).
-    """
-    recognize_face_headless()
-
-
 # Testing function
 def test_face_recognition():
     """Test face recognition without guard system."""
@@ -197,6 +227,7 @@ def test_face_recognition():
     
     # Temporarily enable guard status for testing
     state.guard_status = True
+    state.camera_active = True
     
     try:
         recognize_face()
@@ -204,6 +235,7 @@ def test_face_recognition():
         print("\n[TEST] Interrupted")
     finally:
         state.guard_status = False
+        state.camera_active = True
     
     print("[TEST] Test complete")
 
